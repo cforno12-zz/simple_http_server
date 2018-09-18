@@ -1,22 +1,23 @@
 import socket
 import threading
-import sys
 from datetime import datetime
 import os
-import platform
 import magic
 from wsgiref.handlers import format_date_time
 from time import mktime
+import queue
 
-HOST = socket.gethostname()
+HOST = socket.gethostbyname(socket.gethostname())
 PORT = 0              # Arbitrary non-privileged port
+ACCESS_DISK_LOCK = threading.Lock()
+FILE_DICT = dict()
 
 def create_TCP_socket():
     # create an INET, STREAMing socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     
     # bind this socket to a port
-    server_socket.bind((HOST, PORT))
+    server_socket.bind((HOST, 0))
     
     #listen for X amount of connection
     server_socket.listen(5)
@@ -29,16 +30,27 @@ def client_thread(client_socket):
     #do something with this client socket
 
 def retrieve_source(resource):
-    file_array = resource.strip().split('/')
+    resource = resource.strip()
+    content = None
+    file_array = resource.split('/')
     if file_array[1] == "www":
-        print("file exists")
-        content = None
         resource = "." + resource
+        ACCESS_DISK_LOCK.acquire()
+        if resource in FILE_DICT:
+            FILE_DICT[resource] += 1
+        else:
+            FILE_DICT.update({resource : 1})
+
+        times_called = FILE_DICT.get(resource)
+        print (resource , "|" , HOST ,"|", PORT, "|", times_called)
+        
         with open(resource, 'r') as current_file:
             content = current_file.read()
-        return content
+        ACCESS_DISK_LOCK.release()
     else:
         return None
+
+    return content
 
 def get_curr_date():
     now = datetime.now()
@@ -52,7 +64,6 @@ def modified_date_of_file(filename):
 
 def get_size_of_file(filename):
     return str(os.path.getsize(filename))
-    
 
 def header_response_200(http_version, resource_path):
     response = ""
@@ -72,21 +83,16 @@ def header_response_200(http_version, resource_path):
     response += "Content-Type: " + mime.from_file(resource_path) + "\r\n"
     # get file size
     response += "Content-Length: " + get_size_of_file(resource_path) + "\r\n"
-    print(response)
     return response
     
-    
-    
-
 def get_bytes_response_200(http_version, resource):
-    print("preparing response header...")
     response = header_response_200(http_version, resource)
     # blank line
     response += "\r\n"
-    response += retrieve_source(resource)
-
-    print("FINAL RESPONSE")
-    print(response)
+    file_content = retrieve_source(resource)
+    if file_content == None:
+        return get_bytes_response_404(http_version)
+    response += file_content
 
     #convert string to bytes
     bytes_response = str.encode(response)
@@ -114,49 +120,42 @@ def get_bytes_response_404(http_version):
     response += get_curr_date() + "\r\n"
     return str.encode(response)
 
-def get_response(request):
+def get_response(request, my_queue):
     request_str = request.decode("utf-8")
     request_array = request_str.splitlines()
+    return_value = None
 
-    '''
-    SAMPLE GET REQUEST
-    GET /docs/index.html HTTP/1.1
-    Host: www.nowhere123.com
-    Accept: image/gif, image/jpeg, */*
-    Accept-Language: en-us
-    Accept-Encoding: gzip, deflate
-    User-Agent: Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)
-    (blank line)
-    '''
-    
     # we only want the first line of the request
     if len(request_array[0].split()) != 3:
-        return get_bytes_response_400("HTTP/1.1")
+        return_value =  get_bytes_response_400("HTTP/1.1")
 
     command, resource, http_version = request_array[0].split()
-
-    print ("We are parsing the request...")
-    print ("Command:", command, "// Resource:" , resource)
 
     if command == "GET":
         #check if the file exists
         if does_file_exist(resource):
-            print("sending 200 response")
-            return get_bytes_response_200(http_version, resource)
+            return_value =  get_bytes_response_200(http_version, resource)
         else:
-            return get_bytes_response_404(http_version)
+            return_value =  get_bytes_response_404(http_version)
             #send 404 not found
     else:
-        return get_bytes_response_400(http_verison)
-    
+        return_value =  get_bytes_response_400(http_verison)
+
+    my_queue.put(return_value)
+
 
 if __name__ == "__main__":
+
+    my_queue = queue.Queue()
+    threads = []
 
     while True:
 
         server_socket = create_TCP_socket()
 
-        print ("Server is running on", HOST, ":", server_socket.getsockname()[1])
+        PORT = server_socket.getsockname()[1]
+
+        print ("Server is running on", HOST, ":", PORT)
 
         # accepting a connection from the outside
 
@@ -164,9 +163,16 @@ if __name__ == "__main__":
 
         request = client_socket.recv(4096)
 
-        answer = get_response(request)
-        
-        client_socket.sendall(answer)
-        
-        server_socket.close()
+        t = threading.Thread(target = get_response, args = (request, my_queue))
+        threads.append(t)
+        t.setDaemon(True)
+        t.start()
 
+        
+        for t in threads:
+            t.join()
+
+        while not my_queue.empty():
+            client_socket.sendall(my_queue.get())
+
+        server_socket.close()
