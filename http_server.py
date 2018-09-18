@@ -5,9 +5,11 @@ from datetime import datetime
 import os
 import platform
 import magic
+from wsgiref.handlers import format_date_time
+from time import mktime
 
-HOST = "localhost"               # Symbolic name meaning all available interfaces
-PORT = 8000              # Arbitrary non-privileged port
+HOST = socket.gethostname()
+PORT = 0              # Arbitrary non-privileged port
 
 def create_TCP_socket():
     # create an INET, STREAMing socket
@@ -19,7 +21,6 @@ def create_TCP_socket():
     #listen for X amount of connection
     server_socket.listen(5)
 
-    print ("returning server socket")
     return server_socket
 
 
@@ -29,7 +30,6 @@ def client_thread(client_socket):
 
 def retrieve_source(resource):
     file_array = resource.strip().split('/')
-    print(file_array[1])
     if file_array[1] == "www":
         print("file exists")
         content = None
@@ -40,30 +40,45 @@ def retrieve_source(resource):
     else:
         return None
 
+def get_curr_date():
+    now = datetime.now()
+    stamp = mktime(now.timetuple())
+    return format_date_time(stamp)
+
+def modified_date_of_file(filename):
+    stamp = os.path.getmtime(filename)
+    date = datetime.fromtimestamp(stamp)
+    return format_date_time(mktime(date.timetuple()))
+
+def get_size_of_file(filename):
+    return str(os.path.getsize(filename))
+    
+
 def header_response_200(http_version, resource_path):
     response = ""
     # append http verison and 200 response
     response += (http_version + " 200 OK\r\n" )
     # add date and time
-    date_str = datetime.now().strftime('Date: %a, %d %b %Y %H:%M:%S %Z')
+    date_str = get_curr_date()
     response += (date_str + "\r\n")
     # server name
     response += "Server: Forno/1.0 (Darwin)\n\r"
     # time last modified path
     resource_path = "." + resource_path.strip() # we want the current directory
-    response += datetime.fromtimestamp(os.path.getmtime(resource_path)).strftime("Last-Modified: %a, %d %b %Y %H:%M:%S %Z\r\n")
+    response += modified_date_of_file(resource_path)
+    response += "\r\n"
     # get MIME type
     mime = magic.Magic(mime=True)
     response += "Content-Type: " + mime.from_file(resource_path) + "\r\n"
     # get file size
-    response += "Content-Length: " + str(os.path.getsize(resource_path)) + "\r\n"
+    response += "Content-Length: " + get_size_of_file(resource_path) + "\r\n"
     print(response)
     return response
     
     
     
 
-def get_bytes_response(http_version, resource):
+def get_bytes_response_200(http_version, resource):
     print("preparing response header...")
     response = header_response_200(http_version, resource)
     # blank line
@@ -77,11 +92,29 @@ def get_bytes_response(http_version, resource):
     bytes_response = str.encode(response)
     
     return bytes_response
-        
-    
-    
 
-def parse_request(request):
+#400 bad request
+def get_bytes_response_400():
+    response = ""
+    # just 400 status code
+    response += "400 Bad Request Error\r\n"
+    response += get_curr_date() + "\r\n"
+    return str.encode(response)
+
+def does_file_exist(filepath):
+    if filepath.startswith("."):
+        return os.path.isfile(filepath)
+    else:
+        filepath = "." + filepath
+        return os.path.isfile(filepath)
+
+def get_bytes_response_404(http_version):
+    response = ""
+    response += "404 Not Found\r\n"
+    response += get_curr_date() + "\r\n"
+    return str.encode(response)
+
+def get_response(request):
     request_str = request.decode("utf-8")
     request_array = request_str.splitlines()
 
@@ -95,7 +128,10 @@ def parse_request(request):
     User-Agent: Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)
     (blank line)
     '''
+    
     # we only want the first line of the request
+    if len(request_array[0].split()) != 3:
+        return get_bytes_response_400("HTTP/1.1")
 
     command, resource, http_version = request_array[0].split()
 
@@ -103,32 +139,34 @@ def parse_request(request):
     print ("Command:", command, "// Resource:" , resource)
 
     if command == "GET":
-        print("sending 200 response")
-        return get_bytes_response(http_version, resource)
-        
+        #check if the file exists
+        if does_file_exist(resource):
+            print("sending 200 response")
+            return get_bytes_response_200(http_version, resource)
+        else:
+            return get_bytes_response_404(http_version)
+            #send 404 not found
     else:
-        print("we returned false")
-        pass
-        # send error code back to client    
+        return get_bytes_response_400(http_verison)
     
 
 if __name__ == "__main__":
 
-    server_socket = create_TCP_socket()
-
     while True:
 
-        print ("Server is running on", HOST, ":", PORT)
-        
-        # accepting a connection from the outside
-        client_socket, clientadd = server_socket.accept()
+        server_socket = create_TCP_socket()
 
-        print ("We accepted a connection")
+        print ("Server is running on", HOST, ":", server_socket.getsockname()[1])
+
+        # accepting a connection from the outside
+
+        client_socket, clientadd = server_socket.accept()
 
         request = client_socket.recv(4096)
 
-        answer = parse_request(request)
+        answer = get_response(request)
         
         client_socket.sendall(answer)
         
         server_socket.close()
+
