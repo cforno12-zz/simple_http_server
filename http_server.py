@@ -15,10 +15,10 @@ FILE_DICT = dict()
 def create_TCP_socket():
     # create an INET, STREAMing socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    
+
     # bind this socket to a port
     server_socket.bind((HOST, 0))
-    
+
     #listen for X amount of connection
     server_socket.listen(5)
 
@@ -43,7 +43,7 @@ def retrieve_source(resource, clientadd):
 
         times_called = FILE_DICT.get(resource)
         print (resource , "|" , clientadd[0] ,"|", clientadd[1], "|", times_called)
-        
+
         with open(resource, 'r') as current_file:
             content = current_file.read()
         ACCESS_DISK_LOCK.release()
@@ -73,7 +73,7 @@ def header_response_200(http_version, resource_path):
     date_str = get_curr_date()
     response += (date_str + "\r\n")
     # server name
-    response += "Server: Forno/1.0 (Darwin)\n\r"
+    response += "Server: Forno/1.0 (Darwin)\r\n"
     # time last modified path
     resource_path = "." + resource_path.strip() # we want the current directory
     response += modified_date_of_file(resource_path)
@@ -84,7 +84,7 @@ def header_response_200(http_version, resource_path):
     # get file size
     response += "Content-Length: " + get_size_of_file(resource_path) + "\r\n"
     return response
-    
+
 def get_bytes_response_200(http_version, resource, clientadd):
     response = header_response_200(http_version, resource)
     # blank line
@@ -96,7 +96,7 @@ def get_bytes_response_200(http_version, resource, clientadd):
 
     #convert string to bytes
     bytes_response = str.encode(response)
-    
+
     return bytes_response
 
 #400 bad request
@@ -162,16 +162,15 @@ if __name__ == "__main__":
 
         client_socket, clientadd = server_socket.accept()
 
-        t = threading.Thread(target = get_response, args = (client_socket, clientadd,my_queue))
+        t = threading.Thread(target = get_response, args = (client_socket, clientadd, my_queue))
         threads.append(t)
-        t.setDaemon(True)
         t.start()
-
-        while not my_queue.empty():
-            print(my_queue)
-            client_socket.sendall(my_queue.get())
 
         for t in threads:
             t.join()
 
+        while not my_queue.empty():
+            client_socket.sendall(my_queue.get())
+
         server_socket.close()
+        print("Connection closed.")
