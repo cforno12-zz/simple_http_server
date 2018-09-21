@@ -29,7 +29,7 @@ def client_thread(client_socket):
     pass
     #do something with this client socket
 
-def retrieve_source(resource):
+def retrieve_source(resource, clientadd):
     resource = resource.strip()
     content = None
     file_array = resource.split('/')
@@ -42,7 +42,7 @@ def retrieve_source(resource):
             FILE_DICT.update({resource : 1})
 
         times_called = FILE_DICT.get(resource)
-        print (resource , "|" , HOST ,"|", PORT, "|", times_called)
+        print (resource , "|" , clientadd[0] ,"|", clientadd[1], "|", times_called)
         
         with open(resource, 'r') as current_file:
             content = current_file.read()
@@ -85,11 +85,11 @@ def header_response_200(http_version, resource_path):
     response += "Content-Length: " + get_size_of_file(resource_path) + "\r\n"
     return response
     
-def get_bytes_response_200(http_version, resource):
+def get_bytes_response_200(http_version, resource, clientadd):
     response = header_response_200(http_version, resource)
     # blank line
     response += "\r\n"
-    file_content = retrieve_source(resource)
+    file_content = retrieve_source(resource, clientadd)
     if file_content == None:
         return get_bytes_response_404(http_version)
     response += file_content
@@ -120,7 +120,8 @@ def get_bytes_response_404(http_version):
     response += get_curr_date() + "\r\n"
     return str.encode(response)
 
-def get_response(request, my_queue):
+def get_response(client_socket, clientadd, my_queue):
+    request = client_socket.recv(4096)
     request_str = request.decode("utf-8")
     request_array = request_str.splitlines()
     return_value = None
@@ -134,7 +135,7 @@ def get_response(request, my_queue):
     if command == "GET":
         #check if the file exists
         if does_file_exist(resource):
-            return_value =  get_bytes_response_200(http_version, resource)
+            return_value =  get_bytes_response_200(http_version, resource, clientadd)
         else:
             return_value =  get_bytes_response_404(http_version)
             #send 404 not found
@@ -161,18 +162,16 @@ if __name__ == "__main__":
 
         client_socket, clientadd = server_socket.accept()
 
-        request = client_socket.recv(4096)
-
-        t = threading.Thread(target = get_response, args = (request, my_queue))
+        t = threading.Thread(target = get_response, args = (client_socket, clientadd,my_queue))
         threads.append(t)
         t.setDaemon(True)
         t.start()
 
-        
+        while not my_queue.empty():
+            print(my_queue)
+            client_socket.sendall(my_queue.get())
+
         for t in threads:
             t.join()
-
-        while not my_queue.empty():
-            client_socket.sendall(my_queue.get())
 
         server_socket.close()
