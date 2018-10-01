@@ -106,10 +106,9 @@ def does_file_exist(filepath):
         return os.path.isfile(filepath)
 
 def get_bytes_response_404(http_version):
-    print ("WE ARE RESPONDING WITH A 404")
     response = ""
-    response += http_version + "404 Not Found\r\n"
-    response += "Date: " + get_curr_date() + "\r\n"
+    response += http_version + " 404 Not Found\r\n"
+    response += "\n"
     return str.encode(response)
 
 def get_response(client_socket, clientadd):
@@ -143,6 +142,8 @@ def get_response(client_socket, clientadd):
     else:
         return_value =  get_bytes_response_400(http_verison)
 
+    print("Sending this response....")
+    print(str(return_value, 'utf-8'))
     client_socket.sendall(return_value)
 
 
