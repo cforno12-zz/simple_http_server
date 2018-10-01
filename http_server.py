@@ -1,52 +1,43 @@
 import socket
-import threading
+from threading import Thread, Lock
 from datetime import datetime
 import os
 import magic
 from wsgiref.handlers import format_date_time
 from time import mktime
 import queue
+import sys
 
 HOST = socket.gethostbyname(socket.gethostname())
 PORT = 0              # Arbitrary non-privileged port
-ACCESS_DISK_LOCK = threading.Lock()
+ACCESS_DISK_LOCK = Lock()
 FILE_DICT = dict()
+mutex = Lock()
 
 def create_TCP_socket():
     # create an INET, STREAMing socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    
+
     # bind this socket to a port
     server_socket.bind((HOST, 0))
-    
+
     #listen for X amount of connection
     server_socket.listen(5)
 
     return server_socket
 
 
-def client_thread(client_socket):
-    pass
-    #do something with this client socket
-
 def retrieve_source(resource, clientadd):
+    og_resource = resource
     resource = resource.strip()
     content = None
     file_array = resource.split('/')
     if file_array[1] == "www":
         resource = "." + resource
-        ACCESS_DISK_LOCK.acquire()
-        if resource in FILE_DICT:
-            FILE_DICT[resource] += 1
-        else:
-            FILE_DICT.update({resource : 1})
-
-        times_called = FILE_DICT.get(resource)
-        print (resource , "|" , clientadd[0] ,"|", clientadd[1], "|", times_called)
-        
+        times_called = FILE_DICT.get(og_resource)
+        print (resource , "|" , clientadd[0] ,"|", clientadd[1], "|", times_called, sep='')
         with open(resource, 'r') as current_file:
             content = current_file.read()
-        ACCESS_DISK_LOCK.release()
     else:
         return None
 
@@ -84,7 +75,7 @@ def header_response_200(http_version, resource_path):
     # get file size
     response += "Content-Length: " + get_size_of_file(resource_path) + "\r\n"
     return response
-    
+
 def get_bytes_response_200(http_version, resource, clientadd):
     response = header_response_200(http_version, resource)
     # blank line
@@ -96,10 +87,10 @@ def get_bytes_response_200(http_version, resource, clientadd):
 
     #convert string to bytes
     bytes_response = str.encode(response)
-    
+
     return bytes_response
 
-#400 bad request
+# 400 bad request
 def get_bytes_response_400():
     response = ""
     # just 400 status code
@@ -115,12 +106,13 @@ def does_file_exist(filepath):
         return os.path.isfile(filepath)
 
 def get_bytes_response_404(http_version):
+    print ("WE ARE RESPONDING WITH A 404")
     response = ""
-    response += "404 Not Found\r\n"
-    response += get_curr_date() + "\r\n"
+    response += http_version + "404 Not Found\r\n"
+    response += "Date: " + get_curr_date() + "\r\n"
     return str.encode(response)
 
-def get_response(client_socket, clientadd, my_queue):
+def get_response(client_socket, clientadd):
     request = client_socket.recv(4096)
     request_str = request.decode("utf-8")
     request_array = request_str.splitlines()
@@ -128,9 +120,18 @@ def get_response(client_socket, clientadd, my_queue):
 
     # we only want the first line of the request
     if len(request_array[0].split()) != 3:
-        return_value =  get_bytes_response_400("HTTP/1.1")
+        return_value = get_bytes_response_400("HTTP/1.1")
 
     command, resource, http_version = request_array[0].split()
+
+    mutex.acquire()
+    try:
+        if resource in FILE_DICT:
+            FILE_DICT[resource] += 1
+        else:
+            FILE_DICT.update({resource : 1})
+    finally:
+        mutex.release()
 
     if command == "GET":
         #check if the file exists
@@ -142,36 +143,30 @@ def get_response(client_socket, clientadd, my_queue):
     else:
         return_value =  get_bytes_response_400(http_verison)
 
-    my_queue.put(return_value)
+    client_socket.sendall(return_value)
 
 
 if __name__ == "__main__":
 
-    my_queue = queue.Queue()
     threads = []
+    server_socket = create_TCP_socket()
+
+    PORT = server_socket.getsockname()[1]
+
+    print ("Server is running on ", HOST, ":", PORT, sep='')
 
     while True:
+        try:
+            client_socket, clientadd = server_socket.accept()
+            t = Thread(target = get_response, args = (client_socket, clientadd))
+            threads.append(t)
+            t.start()
+        except KeyboardInterrupt:
+            server_socket.close()
+            print("Closing socket...")
+            sys.exit(0)
 
-        server_socket = create_TCP_socket()
+    for t in threads:
+        t.join()
 
-        PORT = server_socket.getsockname()[1]
-
-        print ("Server is running on", HOST, ":", PORT)
-
-        # accepting a connection from the outside
-
-        client_socket, clientadd = server_socket.accept()
-
-        t = threading.Thread(target = get_response, args = (client_socket, clientadd,my_queue))
-        threads.append(t)
-        t.setDaemon(True)
-        t.start()
-
-        while not my_queue.empty():
-            print(my_queue)
-            client_socket.sendall(my_queue.get())
-
-        for t in threads:
-            t.join()
-
-        server_socket.close()
+    server_socket.close()
