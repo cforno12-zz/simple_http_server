@@ -8,7 +8,8 @@ from time import mktime
 import queue
 import sys
 
-HOST = socket.gethostbyname(socket.gethostname())
+HOST = None
+HOST_IP = None
 PORT = 0              # Arbitrary non-privileged port
 ACCESS_DISK_LOCK = Lock()
 FILE_DICT = dict()
@@ -17,9 +18,13 @@ mutex = Lock()
 def create_TCP_socket():
     # create an INET, STREAMing socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
+    global HOST
+    HOST = socket.gethostname()
     # bind this socket to a port
     server_socket.bind((HOST, 0))
+    global HOST_IP
+    global PORT
+    HOST_IP, PORT = server_socket.getsockname()
 
     #listen for X amount of connection
     server_socket.listen(5)
@@ -142,8 +147,6 @@ def get_response(client_socket, clientadd):
     else:
         return_value =  get_bytes_response_400(http_verison)
 
-    print("Sending this response....")
-    print(str(return_value, 'utf-8'))
     client_socket.sendall(return_value)
 
 
@@ -154,7 +157,7 @@ if __name__ == "__main__":
 
     PORT = server_socket.getsockname()[1]
 
-    print ("Server is running on ", HOST, ":", PORT, sep='')
+    print ("Server is running on ", HOST, " in ", HOST_IP, ":", PORT, sep='')
 
     while True:
         try:
