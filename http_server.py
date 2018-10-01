@@ -64,7 +64,7 @@ def header_response_200(http_version, resource_path):
     date_str = get_curr_date()
     response += (date_str + "\r\n")
     # server name
-    response += "Server: Forno/1.0 (Darwin)\n\r"
+    response += "Server: Forno/1.0 (Darwin)\r\n"
     # time last modified path
     resource_path = "." + resource_path.strip() # we want the current directory
     response += modified_date_of_file(resource_path)
