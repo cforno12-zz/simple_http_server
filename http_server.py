@@ -36,16 +36,11 @@ def retrieve_source(resource, clientadd):
     og_resource = resource
     resource = resource.strip()
     content = None
-    file_array = resource.split('/')
-    if file_array[1] == "www":
-        resource = "." + resource
-        times_called = FILE_DICT.get(og_resource)
-        print (resource , "|" , clientadd[0] ,"|", clientadd[1], "|", times_called, sep='')
-        with open(resource, 'r') as current_file:
-            content = current_file.read()
-    else:
-        return None
-
+    times_called = FILE_DICT.get(og_resource)
+    print (resource[5:] , "|" , clientadd[0] ,"|", clientadd[1], "|", times_called, sep='')
+    with open(resource, 'r') as current_file:
+        content = current_file.read()
+    
     return content
 
 def get_curr_date():
@@ -71,7 +66,7 @@ def header_response_200(http_version, resource_path):
     # server name
     response += "Server: Forno/1.0 (Darwin)\r\n"
     # time last modified path
-    resource_path = "." + resource_path.strip() # we want the current directory
+    resource_path = resource_path.strip() # we want the current directory
     response += modified_date_of_file(resource_path)
     response += "\r\n"
     # get MIME type
@@ -104,11 +99,7 @@ def get_bytes_response_400():
     return str.encode(response)
 
 def does_file_exist(filepath):
-    if filepath.startswith("."):
-        return os.path.isfile(filepath)
-    else:
-        filepath = "." + filepath
-        return os.path.isfile(filepath)
+    return os.path.isfile(filepath)
 
 def get_bytes_response_404(http_version):
     response = ""
@@ -127,6 +118,8 @@ def get_response(client_socket, clientadd):
         return_value = get_bytes_response_400("HTTP/1.1")
 
     command, resource, http_version = request_array[0].split()
+
+    resource = "./www" + resource
 
     mutex.acquire()
     try:
